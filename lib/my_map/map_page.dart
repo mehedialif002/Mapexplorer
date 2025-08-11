@@ -1,19 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
-void main() {
-  runApp(
-    MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Google Map Example',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-      ),
-      home: MyMapPage(),
-    ),
-  );
-}
-
 class MyMapPage extends StatefulWidget {
   @override
   _MyMapPageState createState() => _MyMapPageState();
@@ -22,7 +9,7 @@ class MyMapPage extends StatefulWidget {
 class _MyMapPageState extends State<MyMapPage> {
   late GoogleMapController mapController;
 
-  final LatLng _center = LatLng(23.8103, 90.4125); // Dhaka
+  final LatLng _center = LatLng(23.8103, 90.4125); // Example: Dhaka
 
   void _onMapCreated(GoogleMapController controller) {
     mapController = controller;
