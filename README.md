@@ -2,15 +2,5 @@
 
 A new Flutter project.
 
-## Getting Started
+This is a map app where you can add any entity by clicking on the map. there is  a drawer and 3 list named "Map", "Entity List" and "Add Entity". By clicking map it will redirect to the main screen. By clicking Entity List, all entities can be shown fetched from the api. edit and delete can do by clicking edit and delete icon. Lastly, by clicking add entity, manually latitude and logtitude is taken where by clicking map, latitude and logtitude automatically generates.
 
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
