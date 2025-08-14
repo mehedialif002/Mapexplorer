@@ -2,24 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'dart:convert';
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:http/http.dart' as http;
-import 'package:latlong2/latlong.dart';
-
-import 'dart:convert';
-import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:http/http.dart' as http;
-import 'package:latlong2/latlong.dart';
-
-
-////////////////////////////////////////////////////////////////////
-
+import 'entity.dart';
+import 'api_service.dart';
 
 void main() {
   runApp(const MyApp());
@@ -30,14 +14,15 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'OpenStreetMap Demo with DMS Input',
+      debugShowCheckedModeBanner: false,
+      title: 'OpenStreetMap CRUD',
       theme: ThemeData(primarySwatch: Colors.blue),
       home: const MapScreen(),
     );
   }
 }
 
-enum ScreenView { map, entityList, addEntity }
+enum ScreenView { map, list, add }
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -46,10 +31,9 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
-  List<dynamic> _locations = [];
+  List<Entity> _locations = [];
   bool _loading = true;
   ScreenView _currentView = ScreenView.map;
-
   final MapController _mapController = MapController();
 
   final _formKey = GlobalKey<FormState>();
@@ -64,197 +48,178 @@ class _MapScreenState extends State<MapScreen> {
     fetchLocations();
   }
 
-  @override
-  void dispose() {
-    _titleController.dispose();
-    _latController.dispose();
-    _lonController.dispose();
-    _imageController.dispose();
-    super.dispose();
-  }
-
   Future<void> fetchLocations() async {
-    const url = 'https://labs.anontech.info/cse489/t3/api.php';
+    setState(() => _loading = true);
     try {
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        setState(() {
-          _locations = data;
-          _loading = false;
-        });
-      } else {
-        throw Exception("Failed to load data");
-      }
+      final data = await ApiService.fetchAll();
+      setState(() {
+        _locations = data;
+        _loading = false;
+      });
     } catch (e) {
-      debugPrint("Error fetching locations: $e");
       setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Load failed: $e')),
+      );
     }
   }
 
-  void _moveMapToLocation(LatLng point) {
-    _mapController.move(point, 12);
-  }
-
-  /// Parse decimal or DMS coordinate string to decimal degrees double
   double? parseCoordinate(String input) {
-    // Try decimal parse first
     final decimal = double.tryParse(input);
     if (decimal != null) return decimal;
-
-    // Try DMS parse
     return dmsToDecimal(input);
   }
 
-  /// Convert DMS string (e.g. 22° 32' 41.64" N) to decimal degrees
   double? dmsToDecimal(String dms) {
-    final regex = RegExp(
-        r"""(\d+)[°\s]+(\d+)[\'\s]+([\d.]+)"?\s*([NSEW])""",
-        caseSensitive: false);
+    final regex = RegExp(r"""(\d+)[°\s]+(\d+)[\'\s]+([\d.]+)"?\s*([NSEW])""");
     final match = regex.firstMatch(dms.trim());
-
     if (match == null) return null;
-
-    final degrees = double.tryParse(match.group(1) ?? '') ?? 0;
-    final minutes = double.tryParse(match.group(2) ?? '') ?? 0;
-    final seconds = double.tryParse(match.group(3) ?? '') ?? 0;
-    final direction = (match.group(4) ?? '').toUpperCase();
-
-    double decimal = degrees + (minutes / 60) + (seconds / 3600);
-
-    if (direction == 'S' || direction == 'W') {
-      decimal = -decimal;
-    }
-
-    return decimal;
+    double deg = double.parse(match.group(1)!);
+    double min = double.parse(match.group(2)!);
+    double sec = double.parse(match.group(3)!);
+    String dir = match.group(4)!.toUpperCase();
+    double dec = deg + (min / 60) + (sec / 3600);
+    if (dir == 'S' || dir == 'W') dec = -dec;
+    return dec;
   }
 
   String? validateCoordinate(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return "Enter coordinate";
-    }
-    if (parseCoordinate(value.trim()) == null) {
-      return "Enter valid decimal or DMS (e.g. 22° 32' 41.64\" N)";
-    }
+    if (value == null || value.isEmpty) return "Enter coordinate";
+    if (parseCoordinate(value) == null) return "Invalid coordinate";
     return null;
   }
 
-  void _addEntity() {
-    if (_formKey.currentState!.validate()) {
-      final title = _titleController.text.trim();
+  void _moveMap(LatLng p) => _mapController.move(p, 12);
 
-      final latInput = _latController.text.trim();
-      final lonInput = _lonController.text.trim();
+  Future<void> _addEntity() async {
+    if (!_formKey.currentState!.validate()) return;
+    final title = _titleController.text.trim();
+    final lat = parseCoordinate(_latController.text.trim())!;
+    final lon = parseCoordinate(_lonController.text.trim())!;
+    final imageUrl = _imageController.text.trim().isEmpty
+        ? null
+        : _imageController.text.trim();
 
-      final lat = parseCoordinate(latInput);
-      final lon = parseCoordinate(lonInput);
-
-      if (lat == null || lon == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid latitude or longitude format')),
-        );
-        return;
-      }
-
-      final image = _imageController.text.trim().isEmpty
-          ? null
-          : _imageController.text.trim();
-
+    try {
+      final created = await ApiService.create(
+        title: title,
+        lat: lat,
+        lon: lon,
+        imageFile: null,
+        imageUrl: imageUrl,
+      );
       setState(() {
-        _locations.add({
-          "title": title,
-          "lat": lat.toString(),
-          "lon": lon.toString(),
-          "image": image,
-        });
+        _locations.add(created);
         _currentView = ScreenView.map;
       });
-
       _titleController.clear();
       _latController.clear();
       _lonController.clear();
       _imageController.clear();
 
-      _moveMapToLocation(LatLng(lat, lon));
+      _moveMap(LatLng(lat, lon)); // Center map on new marker
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Entity "$title" added!')),
+        SnackBar(content: Text('Entity "$title" added')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Create failed: $e')),
       );
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text("OpenStreetMap Demo")),
-      drawer: Drawer(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            const DrawerHeader(
-              decoration: BoxDecoration(color: Colors.blue),
-              child: Center(
-                child: Text(
-                  "Menu",
-                  style: TextStyle(color: Colors.white, fontSize: 24),
-                ),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.map),
-              title: const Text("Map"),
-              selected: _currentView == ScreenView.map,
-              onTap: () {
-                Navigator.pop(context);
-                setState(() => _currentView = ScreenView.map);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.list),
-              title: const Text("Entity List"),
-              selected: _currentView == ScreenView.entityList,
-              onTap: () {
-                Navigator.pop(context);
-                setState(() => _currentView = ScreenView.entityList);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.add),
-              title: const Text("Add Entity"),
-              selected: _currentView == ScreenView.addEntity,
-              onTap: () {
-                Navigator.pop(context);
-                setState(() => _currentView = ScreenView.addEntity);
-              },
-            ),
-          ],
-        ),
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _buildBody(),
-    );
-  }
-
-  Widget _buildBody() {
-    switch (_currentView) {
-      case ScreenView.map:
-        return _buildMap();
-      case ScreenView.entityList:
-        return _buildEntityList();
-      case ScreenView.addEntity:
-        return _buildAddEntityForm();
+  Future<void> _deleteEntity(int index) async {
+    try {
+      await ApiService.deleteById(_locations[index].id);
+      setState(() => _locations.removeAt(index));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Delete failed: $e')),
+      );
     }
   }
 
-  Widget _buildMap() {
-    final centerPoint = LatLng(23.6850, 90.3563);
+  Future<void> _updateEntity(int index, Entity e) async {
+    try {
+      await ApiService.update(
+        id: e.id,
+        title: e.title,
+        lat: e.lat,
+        lon: e.lon,
+        imageFile: null,
+        imageUrl: e.image,
+      );
+      setState(() => _locations[index] = e);
+    } catch (err) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Update failed: $err')),
+      );
+    }
+  }
 
+  void _showUpdateDialog(int index) {
+    final t = TextEditingController(text: _locations[index].title);
+    final la = TextEditingController(text: _locations[index].lat.toString());
+    final lo = TextEditingController(text: _locations[index].lon.toString());
+    final im = TextEditingController(text: _locations[index].image ?? '');
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Update Entity"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: t, decoration: const InputDecoration(labelText: "Title")),
+            TextField(controller: la, decoration: const InputDecoration(labelText: "Latitude")),
+            TextField(controller: lo, decoration: const InputDecoration(labelText: "Longitude")),
+            TextField(controller: im, decoration: const InputDecoration(labelText: "Image URL")),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          TextButton(
+            onPressed: () {
+              final lat = parseCoordinate(la.text.trim()) ?? 0;
+              final lon = parseCoordinate(lo.text.trim()) ?? 0;
+              final entity = Entity(
+                id: _locations[index].id,
+                title: t.text.trim(),
+                lat: lat,
+                lon: lon,
+                image: im.text.trim().isEmpty ? null : im.text.trim(),
+              );
+              _updateEntity(index, entity);
+              Navigator.pop(context);
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+  }
+
+
+
+
+
+
+  Widget _buildMap() {
     return FlutterMap(
       mapController: _mapController,
       options: MapOptions(
-        initialCenter: centerPoint,
+        initialCenter: LatLng(23.6850, 90.3563),
         initialZoom: 6,
+        onTap: (tapPosition, point) {
+          // Pre-fill lat/lon when user taps map
+          _latController.text = point.latitude.toStringAsFixed(6);
+          _lonController.text = point.longitude.toStringAsFixed(6);
+          _titleController.clear();
+          _imageController.clear();
+          setState(() {
+            _currentView = ScreenView.add;
+          });
+        },
       ),
       children: [
         TileLayer(
@@ -263,319 +228,111 @@ class _MapScreenState extends State<MapScreen> {
         ),
         MarkerLayer(
           markers: _locations.map((loc) {
-            final lat = double.tryParse(loc['lat'].toString()) ?? 0.0;
-            final lon = double.tryParse(loc['lon'].toString()) ?? 0.0;
-            if (lat == 0.0 && lon == 0.0) return null;
-
             return Marker(
+              point: LatLng(loc.lat, loc.lon),
               width: 40,
               height: 40,
-              point: LatLng(lat, lon),
               child: GestureDetector(
-                onTap: () {
-                  showDialog(
-                    context: context,
-                    builder: (_) => AlertDialog(
-                      title: Text(loc['title'] ?? "No title"),
-                      content: loc['image'] != null
-                          ? Image.network(
-                        loc['image'],
-                        height: 150,
-                        fit: BoxFit.cover,
-                      )
-                          : const Text("No image available"),
-                      actions: [
-                        TextButton(
-                          child: const Text("Close"),
-                          onPressed: () => Navigator.pop(context),
-                        )
-                      ],
-                    ),
-                  );
-                },
-                child: const Icon(
-                  Icons.location_pin,
-                  color: Colors.red,
-                  size: 40,
+                onTap: () => showDialog(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    title: Text(loc.title),
+                    content: loc.image != null
+                        ? Image.network(loc.image!)
+                        : const Text("No image"),
+                  ),
                 ),
+                child: const Icon(Icons.location_pin, color: Colors.red, size: 40),
               ),
             );
-          }).where((m) => m != null).cast<Marker>().toList(),
+          }).toList(),
         ),
       ],
     );
   }
-/*
-  Widget _buildEntityList() {
+
+  Widget _buildList() {
     return ListView.builder(
       itemCount: _locations.length,
-      itemBuilder: (context, index) {
-        final loc = _locations[index];
+      itemBuilder: (context, i) {
+        final loc = _locations[i];
         return ListTile(
-          title: Text(loc['title'] ?? "No Title"),
-          subtitle: Text("Lat: ${loc['lat']}, Lon: ${loc['lon']}"),
-          leading: loc['image'] != null
-              ? Image.network(
-            loc['image'],
-            width: 40,
-            height: 40,
-            fit: BoxFit.cover,
-          )
-              : const Icon(Icons.location_on),
-          trailing: IconButton(
-            icon: const Icon(Icons.delete, color: Colors.red),
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (_) => AlertDialog(
-                  title: const Text("Confirm Delete"),
-                  content: Text('Delete "${loc['title']}"?'),
-                  actions: [
-                    TextButton(
-                      child: const Text("Cancel"),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                    TextButton(
-                      child: const Text("Delete", style: TextStyle(color: Colors.red)),
-                      onPressed: () {
-                        setState(() {
-                          _locations.removeAt(index);
-                        });
-                        Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Deleted "${loc['title']}"')),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-          onTap: () {
-            final lat = double.tryParse(loc['lat'].toString()) ?? 0.0;
-            final lon = double.tryParse(loc['lon'].toString()) ?? 0.0;
-            if (lat != 0.0 && lon != 0.0) {
-              setState(() {
-                _currentView = ScreenView.map;
-                _moveMapToLocation(LatLng(lat, lon));
-              });
-            }
-          },
-        );
-      },
-    );
-  }
-*/
-  //////////////////////////////////////////////////////////////////////
-  Widget _buildEntityList() {
-    return ListView.builder(
-      itemCount: _locations.length,
-      itemBuilder: (context, index) {
-        final loc = _locations[index];
-        return ListTile(
-          title: Text(loc['title'] ?? "No Title"),
-          subtitle: Text("Lat: ${loc['lat']}, Lon: ${loc['lon']}"),
-          leading: loc['image'] != null
-              ? Image.network(
-            loc['image'],
-            width: 40,
-            height: 40,
-            fit: BoxFit.cover,
-          )
+          title: Text(loc.title),
+          subtitle: Text("Lat: ${loc.lat}, Lon: ${loc.lon}"),
+          leading: loc.image != null
+              ? Image.network(loc.image!, width: 40, height: 40, fit: BoxFit.cover)
               : const Icon(Icons.location_on),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(
-                icon: const Icon(Icons.edit, color: Colors.blue),
-                onPressed: () {
-                  _showUpdateEntityDialog(index, loc);
-                },
-              ),
+              IconButton(icon: const Icon(Icons.edit), onPressed: () => _showUpdateDialog(i)),
               IconButton(
                 icon: const Icon(Icons.delete, color: Colors.red),
-                onPressed: () {
-                  showDialog(
-                    context: context,
-                    builder: (_) => AlertDialog(
-                      title: const Text("Confirm Delete"),
-                      content: Text('Delete "${loc['title']}"?'),
-                      actions: [
-                        TextButton(
-                          child: const Text("Cancel"),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                        TextButton(
-                          child: const Text("Delete", style: TextStyle(color: Colors.red)),
-                          onPressed: () {
-                            setState(() {
-                              _locations.removeAt(index);
-                            });
-                            Navigator.pop(context);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Deleted "${loc['title']}"')),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  );
-                },
+                onPressed: () => _deleteEntity(i),
               ),
             ],
           ),
-          onTap: () {
-            final lat = double.tryParse(loc['lat'].toString()) ?? 0.0;
-            final lon = double.tryParse(loc['lon'].toString()) ?? 0.0;
-            if (lat != 0.0 && lon != 0.0) {
-              setState(() {
-                _currentView = ScreenView.map;
-                _moveMapToLocation(LatLng(lat, lon));
-              });
-            }
-          },
         );
       },
     );
   }
-  void _showUpdateEntityDialog(int index, Map<String, dynamic> loc) {
-    final titleController = TextEditingController(text: loc['title']);
-    final latController = TextEditingController(text: loc['lat'].toString());
-    final lonController = TextEditingController(text: loc['lon'].toString());
-    final imageController = TextEditingController(text: loc['image'] ?? '');
 
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("Update Entity"),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleController,
-                decoration: const InputDecoration(labelText: "Title"),
-              ),
-              TextField(
-                controller: latController,
-                decoration: const InputDecoration(labelText: "Latitude"),
-              ),
-              TextField(
-                controller: lonController,
-                decoration: const InputDecoration(labelText: "Longitude"),
-              ),
-              TextField(
-                controller: imageController,
-                decoration: const InputDecoration(labelText: "Image URL (optional)"),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            child: const Text("Cancel"),
-            onPressed: () => Navigator.pop(context),
-          ),
-          TextButton(
-            child: const Text("Save"),
-            onPressed: () {
-              final lat = parseCoordinate(latController.text.trim());
-              final lon = parseCoordinate(lonController.text.trim());
-
-              if (lat == null || lon == null) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Invalid coordinates")),
-                );
-                return;
-              }
-
-              setState(() {
-                _locations[index] = {
-                  "title": titleController.text.trim(),
-                  "lat": lat.toString(),
-                  "lon": lon.toString(),
-                  "image": imageController.text.trim().isEmpty
-                      ? null
-                      : imageController.text.trim(),
-                };
-                _currentView = ScreenView.map;
-              });
-
-              _moveMapToLocation(LatLng(lat, lon));
-              Navigator.pop(context);
-
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Entity updated!")),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  //////////////////////////////////////////////////////////////////////
-  Widget _buildAddEntityForm() {
+  Widget _buildAddForm() {
     return Padding(
-      padding: const EdgeInsets.all(16.0),
+      padding: const EdgeInsets.all(16),
       child: Form(
         key: _formKey,
         child: ListView(
           children: [
-            const Text(
-              "Add New Entity",
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 20),
             TextFormField(
+              autofocus: true,
               controller: _titleController,
-              decoration: const InputDecoration(
-                labelText: "Title",
-                border: OutlineInputBorder(),
-              ),
-              validator: (value) =>
-              (value == null || value.trim().isEmpty) ? "Enter title" : null,
+              decoration: const InputDecoration(labelText: "Title"),
+              validator: (v) => v!.isEmpty ? "Required" : null,
             ),
+            const SizedBox(height: 8),
+            TextFormField(controller: _latController, decoration: const InputDecoration(labelText: "Latitude"), validator: validateCoordinate),
+            const SizedBox(height: 8),
+            TextFormField(controller: _lonController, decoration: const InputDecoration(labelText: "Longitude"), validator: validateCoordinate),
+            const SizedBox(height: 8),
+            TextFormField(controller: _imageController, decoration: const InputDecoration(labelText: "Image URL")),
             const SizedBox(height: 16),
-            TextFormField(
-              controller: _latController,
-              decoration: const InputDecoration(
-                labelText: "Latitude (decimal or DMS, e.g. 22° 32' 41.64\" N)",
-                border: OutlineInputBorder(),
-              ),
-              validator: validateCoordinate,
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _lonController,
-              decoration: const InputDecoration(
-                labelText: "Longitude (decimal or DMS, e.g. 90° 20' 30\" E)",
-                border: OutlineInputBorder(),
-              ),
-              validator: validateCoordinate,
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _imageController,
-              decoration: const InputDecoration(
-                labelText: "Image URL (optional)",
-                border: OutlineInputBorder(),
-              ),
-              keyboardType: TextInputType.url,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: _addEntity,
-              child: const Text("Add Entity"),
-            ),
+            ElevatedButton(onPressed: _addEntity, child: const Text("Add Entity")),
           ],
         ),
       ),
     );
   }
+
+  @override
+  Widget build(BuildContext context) {
+
+
+    return Scaffold(
+
+
+      appBar: AppBar(title: const Text("BANGLADESH centered MAP")),
+      drawer: Drawer(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            const DrawerHeader(
+              decoration: BoxDecoration(color: Colors.blue),
+              child: Center(child: Text("Menu", style: TextStyle(color: Colors.white, fontSize: 24))),
+            ),
+            ListTile(title: const Text("Map"), onTap: () => setState(() => _currentView = ScreenView.map)),
+            ListTile(title: const Text("Entity List"), onTap: () => setState(() => _currentView = ScreenView.list)),
+            ListTile(title: const Text("Add Entity"), onTap: () => setState(() => _currentView = ScreenView.add)),
+          ],
+        ),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _currentView == ScreenView.map
+          ? _buildMap()
+          : _currentView == ScreenView.list
+          ? _buildList()
+          : _buildAddForm(),
+    );
+  }
 }
-
-
-
-
